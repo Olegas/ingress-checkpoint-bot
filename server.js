@@ -193,3 +193,9 @@ poll(function(updates){
 });
 
 app.listen(process.env.PORT);
+
+// Keep alive every 5 min
+var http = require("http");
+setInterval(function() {
+   http.get("http://ingress-checkpoint-bot.herokuapp.com");
+}, 300000);
