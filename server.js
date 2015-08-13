@@ -64,37 +64,126 @@ function poll(callback) {
    setTimeout(pollInternal, 1000);
 }
 
+function getNearestCheckpoint(base) {
+   var delta, hr, min, sec;
+
+   base = base || Date.now();
+   if (base instanceof Date) {
+      base = +base;
+   }
+   delta = (baseCheckpointTimestamp - base) % checkpointLength;
+   if (delta < 0) {
+      delta = checkpointLength + delta;
+   }
+   delta = ~~(delta / 1000);
+   sec = delta % 60;
+   delta = ~~(delta / 60);
+   min = delta % 60;
+   hr = ~~(delta / 60);
+
+   return {
+      absolute: base + (hr*60*60*1000 + min*60*1000 + sec*1000),
+      till: {
+         hr: hr,
+         min: min,
+         sec: sec
+      }
+   };
+}
+
+function getCheckpointsAtDate(date) {
+   var first = getNearestCheckpoint(date), result = [], next, end;
+
+   end = new Date(+date);
+   end.setDate(end.getDate() + 1);
+
+   next = first.absolute;
+   do {
+      result.push(new Date(next));
+      next += checkpointLength;
+   } while(next < +end);
+
+   return result;
+}
+
+function fmtDate(date) {
+   return util.format('%s.%s.%s', zPad(date.getDate()), zPad(date.getMonth() + 1), date.getFullYear());
+}
+
+function fmtTime(date) {
+   return util.format('%s:%s:%s', zPad(date.getHours()), zPad(date.getMinutes()), zPad(date.getSeconds()));
+}
+
 app.use(require('body-parser').json());
 
 poll(function(updates){
+   var now = new Date(), today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
    updates.forEach(function(update){
-
-      console.log(JSON.stringify(update.message, null, 2));
 
       if (!update.message.text) {
          return;
       }
 
-      var msg = update.message, text = msg.text.toLowerCase(), prefix = '';
+      var
+         msg = update.message,
+         text = msg.text.toLowerCase().trim(),
+         marker = 'бот когда отсечк',
+         reDay = /в(?:о)? (понедельник|вторник|среду|четверг|пятницу|субботу|воскресенье)/i,
+         reDate = /и ([0-9]{1,2}).([0-9]{1,2})(?:.([0-9]{2,4}))?/i,
+         remainder, reply, base;
 
-      text = text.replace(/\s+/g, ' ').replace(/[,.-?!]/g, '');
+      text = text.replace(/\s+/g, ' ').replace(/[,?!-]/g, '');
 
       console.log('Got update. Chat: %s, user: %s, message: %s', msg.chat.id, msg.from.username, text);
-      if (text == 'бот когда отсечка') {
-         var delta = (baseCheckpointTimestamp - Date.now()) % checkpointLength;
-         if (delta < 0) {
-            delta = checkpointLength + delta;
+      if (text.indexOf(marker) === 0) {
+
+         remainder = text.substr(marker.length).trim();
+
+         if (remainder) {
+            if (remainder == 'а') {
+               base = now;
+            } else if (remainder == 'и') {
+               base = getCheckpointsAtDate(today);
+            } else if (remainder == 'и завтра') {
+               base = getCheckpointsAtDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0));
+            } else if (reDay.test(remainder)) {
+               var dayStr = remainder.match(reDay)[0];
+               base = null;
+            } else if (reDate.test(remainder)) {
+               var comps = remainder.match(reDate);
+               var day = +comps[1];
+               var mon = +comps[2];
+               var year = +comps[3] || 2015;
+               if (year < 100) {
+                  year += 2000;
+               }
+               base = getCheckpointsAtDate(new Date(year, mon - 1, day, 0, 0, 0, 0));
+            }
          }
-         delta = ~~(delta / 1000);
-         var sec = delta % 60;
-         delta = ~~(delta / 60);
-         var min = delta % 60;
-         var hr = ~~(delta / 60);
-         console.log('%d %d %d', baseCheckpointTimestamp, Date.now(), delta);
-         https.get(mkCallUrl('sendMessage', {
-            chat_id: msg.chat.id,
-            text: util.format('Ближайшая отсечка через %s:%s:%s', zPad(hr), zPad(min), zPad(sec))
-         }));
+
+         if (base instanceof Array) {
+            reply = util.format('Отсечки %s:\n', fmtDate(base[0])) + base.reduce(function(res, d){
+               res.push(fmtTime(d));
+               return res;
+            }, []).join(', ');
+         } else if (base instanceof Date || typeof base == 'number') {
+            base = getNearestCheckpoint(base);
+            reply = util.format(
+               'Ближайшая отсечка через %s:%s:%s',
+               zPad(base.till.hr),
+               zPad(base.till.min),
+               zPad(base.till.sec));
+         } else {
+            reply = 'Я пока не могу ответить на этот вопрос...';
+         }
+
+         if (reply) {
+            https.get(mkCallUrl('sendMessage', {
+               chat_id: msg.chat.id,
+               text: reply
+            }));
+         }
+
       }
    });
 });
