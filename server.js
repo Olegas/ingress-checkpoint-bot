@@ -111,7 +111,11 @@ function fmtDate(date) {
 }
 
 function fmtTime(date) {
-   return util.format('%s:%s:%s', zPad(date.getHours()), zPad(date.getMinutes()), zPad(date.getSeconds()));
+   return util.format(
+      '%s:%s',
+      zPad(date.getHours()),
+      zPad(date.getMinutes())
+   );
 }
 
 app.use(require('body-parser').json());
